@@ -1,0 +1,250 @@
+# Project Outline: Deterministic Graph Orchestration for Authorized Test Environments
+
+## Objective
+
+Build a self-hosted control plane that creates, operates, observes, and dismantles reproducible multi-tier graphs in approved test environments. The system manages desired topology, authorized credentials, workload execution, node health, and fault containment.
+
+The design prioritizes:
+
+- deterministic behavior;
+- explicit policy enforcement;
+- isolated execution;
+- reversible state changes where supported, with compensating actions otherwise;
+- complete operational traceability.
+
+---
+
+## Scope and Boundaries
+
+The platform is limited to synthetic nodes, owned assets, or systems for which the operator has explicit testing authorization. Non-production environments and synthetic or approved test data are the default. Production testing requires a separate, time-bounded authorization.
+
+It must:
+
+- use only allowlisted environments and integrations;
+- respect published API contracts, access controls, and rate limits;
+- reject actions outside the declared test scope;
+- prevent unsolicited interaction with unauthorized third parties;
+- prohibit deceptive activity, human impersonation, security-control bypass, and manipulation of third-party metrics;
+- make every state-changing action attributable, reversible where supported, and otherwise subject to a documented compensating action.
+
+---
+
+## System Model
+
+The platform represents infrastructure as versioned topologies composed of nodes and directed edges. Each topology is a directed acyclic graph; validation rejects cycles and tier transitions that are not explicitly permitted.
+
+| Tier | Role | Responsibility |
+| --- | --- | --- |
+| **Tier 1: Reference Endpoints** | System under observation | Exposes the behavior or aggregate condition the test is intended to measure. |
+| **Tier 2: Policy Relays** | Controlled intermediary layer | Applies routing, admission, and containment policies between endpoints and load agents. |
+| **Tier 3: Load Agents** | Isolated execution layer | Produces authorized test traffic according to a declared workload profile. |
+
+Each topology version defines the permitted edge types between tiers. Any undeclared or prohibited edge must be rejected before execution.
+
+---
+
+## Core Functional Requirements
+
+### 1. Deterministic Topology Planning
+
+The controller accepts a declarative graph specification and compiles it into a stable execution plan.
+
+The planner must support:
+
+- explicit source-to-destination mappings;
+- allow and deny policies for node pairs and edge types;
+- idempotent operations;
+- dependency ordering;
+- dry-run validation;
+- reproducible canonical plans when given the same complete input snapshot.
+
+The planning snapshot contains the graph specification, workload profile, observed-state and inventory snapshot, policy bundle, planner version, and deterministic seed. Canonical plan comparisons exclude volatile metadata such as timestamps and correlation IDs.
+
+### 2. Authorized State Reconciliation
+
+Adapters interact with approved test systems through managed credentials. Reconciliation runs in response to observed-state events and at a configurable interval. It compares desired state with observed state and applies only the changes required to converge before the integration-specific deadline.
+
+All state transitions must include:
+
+- authorization checks;
+- bounded retries and timeouts;
+- idempotency keys;
+- rollback or compensating actions;
+- an append-only, tamper-evident audit record for the configured retention period.
+
+### 3. Health Classification and Lifecycle Control
+
+Nodes receive health scores from configurable, observable signals. Policy converts those scores into deterministic lifecycle transitions.
+
+Each health policy defines signal freshness, thresholds, hysteresis, and permitted state transitions.
+
+Supported states include:
+
+- `registered`;
+- `validating`;
+- `ready`;
+- `active`;
+- `quarantined`;
+- `retired`.
+
+An unhealthy node must be quarantined, removed from future plans, and disconnected from its policy-computed affected subgraph. Shared resources remain active when they have an unaffected valid dependency path.
+
+### 4. Runtime and Credential Isolation
+
+Execution units must be separated according to the configured security boundary. Isolation exists to improve test reproducibility, protect credentials, and limit the impact of failures.
+
+At minimum, the platform must enforce:
+
+- isolated runtimes or containers;
+- scoped service identities;
+- controlled network egress;
+- encrypted secret storage;
+- per-tenant resource limits;
+- automatic credential rotation and revocation.
+
+### 5. Controlled Workload Scheduling
+
+The scheduler executes declared workload profiles within the policy budgets captured by the planning snapshot. A workload profile may reduce those budgets but cannot raise them.
+
+Profiles may define:
+
+- start and stop conditions;
+- concurrency limits;
+- ramp-up and ramp-down periods;
+- deterministic jitter derived from a recorded seed;
+- pause, resume, and cancellation behavior;
+- global and per-integration rate limits.
+
+Scheduling variance is a test parameter, not a mechanism for imitating people or evading detection.
+
+---
+
+## Data Contracts
+
+### Node
+
+- stable identifier;
+- tier and role;
+- owning tenant;
+- authorized environment;
+- authorization grant reference;
+- configuration version;
+- lifecycle state;
+- health evaluation reference;
+- health status;
+- runtime reference.
+
+### Edge
+
+- stable identifier;
+- source and destination node IDs;
+- relationship type;
+- desired and observed state;
+- policy decision;
+- policy version and decision reason;
+- topology version.
+
+### Job
+
+- stable identifier;
+- owning tenant;
+- authorized environment and integration;
+- authorization grant reference;
+- correlation ID;
+- topology version;
+- workload profile;
+- deterministic seed;
+- execution status;
+- timestamps;
+- result summary.
+
+### Audit Event
+
+- actor;
+- owning tenant;
+- authorization grant reference;
+- requested action;
+- authorization result;
+- affected resources;
+- before and after state;
+- correlation ID;
+- timestamp.
+
+Before and after state must exclude or redact secrets.
+
+### Authorization Grant
+
+- stable reference and issuer;
+- owning tenant;
+- approved environments and integrations;
+- permitted actions and resource scope;
+- effective and expiration timestamps;
+- revocation status.
+
+---
+
+## Primary Workflows
+
+### Node Onboarding
+
+1. Register a node and its ownership metadata.
+2. Verify environment authorization and credential scope.
+3. Start the node in `validating`.
+4. Run health and connectivity checks.
+5. Promote the node to `ready` or move it to `quarantined`.
+
+### Topology Deployment
+
+1. Submit a versioned graph specification.
+2. Validate schema, authorization, adjacency rules, and capacity.
+3. Produce a dry-run plan and obtain policy approval.
+4. Require human approval when policy classifies the plan as high impact, then execute approved changes in dependency order.
+5. Reconcile observed state and publish an audit summary.
+
+### Fault Containment
+
+1. Detect a health or policy violation.
+2. Stop affected jobs and quarantine the relevant node.
+3. Remove or disable edges in the policy-computed affected subgraph.
+4. Confirm that unaffected subgraphs remain stable.
+5. Require an explicit recovery decision before reactivation.
+
+### Teardown
+
+1. Stop active workloads.
+2. Remove edges in reverse dependency order.
+3. Revoke temporary credentials and release runtimes.
+4. Confirm that no active managed or orphaned runtime, temporary credential, job, or edge remains.
+5. Retain the final audit record according to policy.
+
+---
+
+## Governance and Safety Controls
+
+- environment and integration allowlists;
+- role-based access control with least privilege;
+- approval gates for high-impact changes;
+- per-tenant quotas and rate budgets;
+- tamper-evident audit logs;
+- global and tenant-level kill switches;
+- configurable retention and policy-controlled deletion after the retention period;
+- time-bounded authorization grants that fail closed after expiration or revocation;
+- periodic authorization and credential reviews.
+
+---
+
+## Acceptance Criteria
+
+The initial release is complete when:
+
+1. identical versioned input snapshots produce identical canonical plans;
+2. undeclared and prohibited edges are rejected before any adapter write or state-changing external call;
+3. requests with the same idempotency key and payload produce at most one external state change during the configured retention window;
+4. reconciliation converges within the configured deadline or records a terminal failure and quarantines the affected resources;
+5. an unhealthy subgraph is isolated within the policy deadline without violating the service objective for unaffected subgraphs;
+6. permitted, denied, and failed external actions and internal state transitions are represented in the audit log;
+7. automated tests verify tenant isolation, default-deny egress, secret protection, and quota enforcement;
+8. executed workloads never exceed the policy snapshot's concurrency or rate budgets;
+9. an authorized operator can stop workloads and revoke credentials within the configured emergency-response deadline;
+10. expired or revoked authorization prevents new external writes;
+11. after teardown converges, authoritative inventory contains no active managed or orphaned runtime, temporary credential, job, or edge; retained audit artifacts are excluded.
